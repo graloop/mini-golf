@@ -1,9 +1,60 @@
 /**
  * Server-authoritative 2D Physics Engine for Mini-Golf
  * Handles ball movement, velocity damping (friction), wall collisions with restitution,
- * circular bumper collisions, ball-to-ball elastic collisions, hazard interactions (sand/water),
+ * ball-to-ball elastic collisions, hazard interactions (sand/water), hole magnetism,
  * and hole detection.
  */
+
+function clamp(v, min, max) {
+  return Math.max(min, Math.min(max, v));
+}
+
+// Standard ray-casting point-in-polygon test (used for irregular sand bunker shapes)
+function pointInPolygon(px, py, points) {
+  let inside = false;
+  for (let i = 0, j = points.length - 1; i < points.length; j = i++) {
+    const xi = points[i].x, yi = points[i].y;
+    const xj = points[j].x, yj = points[j].y;
+    const intersect = ((yi > py) !== (yj > py)) &&
+      (px < ((xj - xi) * (py - yi)) / (yj - yi) + xi);
+    if (intersect) inside = !inside;
+  }
+  return inside;
+}
+
+function distToSegmentSquared(px, py, x1, y1, x2, y2) {
+  const dx = x2 - x1, dy = y2 - y1;
+  const lenSqr = dx * dx + dy * dy;
+  if (lenSqr === 0) {
+    const ddx = px - x1, ddy = py - y1;
+    return ddx * ddx + ddy * ddy;
+  }
+  let t = ((px - x1) * dx + (py - y1) * dy) / lenSqr;
+  t = clamp(t, 0, 1);
+  const cx = x1 + t * dx, cy = y1 + t * dy;
+  const ddx = px - cx, ddy = py - cy;
+  return ddx * ddx + ddy * ddy;
+}
+
+// Ball-vs-shape overlap tests use the ball's outer edge (radius) as the collision
+// frontier, not just its center point, so hazards trigger right as the ball touches
+// them instead of after it has already visually clipped halfway inside.
+function circleOverlapsPolygon(cx, cy, radius, points) {
+  if (pointInPolygon(cx, cy, points)) return true;
+  for (let i = 0, j = points.length - 1; i < points.length; j = i++) {
+    if (distToSegmentSquared(cx, cy, points[j].x, points[j].y, points[i].x, points[i].y) <= radius * radius) {
+      return true;
+    }
+  }
+  return false;
+}
+
+function circleOverlapsRect(cx, cy, radius, rx, ry, rw, rh) {
+  const closestX = clamp(cx, rx, rx + rw);
+  const closestY = clamp(cy, ry, ry + rh);
+  const dx = cx - closestX, dy = cy - closestY;
+  return (dx * dx + dy * dy) <= radius * radius;
+}
 
 class PhysicsEngine {
   constructor() {
@@ -11,6 +62,9 @@ class PhysicsEngine {
     this.stopThreshold = 0.02; // Velocity magnitude below which ball stops
     this.ballRadius = 12;
     this.subSteps = 4; // Sub-stepping for ultra-stable collision without tunneling
+    this.collisionDamping = 0.92; // Bounces bleed a little speed instead of staying perfectly elastic
+    this.holeAttractionMultiplier = 1.2; // Magnetic pull only reaches just past the rim
+    this.holeAttractionStrength = 0.16; // A light nudge, not a snap-in magnet
   }
 
   /**
@@ -36,9 +90,7 @@ class PhysicsEngine {
         let currentFriction = this.friction;
         if (course.hazards) {
           for (const hazard of course.hazards) {
-            if (hazard.type === 'sand' &&
-                ball.x >= hazard.x && ball.x <= hazard.x + hazard.width &&
-                ball.y >= hazard.y && ball.y <= hazard.y + hazard.height) {
+            if (hazard.type === 'sand' && this.isBallInHazard(ball, hazard)) {
               currentFriction = Math.pow(this.friction, hazard.frictionMultiplier || 3.0);
             }
           }
@@ -68,23 +120,22 @@ class PhysicsEngine {
           const prevX = ball.x;
           const prevY = ball.y;
 
+          // Magnetic hole attraction: a ball passing near the cup gets a light pull
+          // toward it, stronger the closer/slower it is (subtle lip-in effect)
+          if (course.hole) {
+            this.applyHoleAttraction(ball, course.hole);
+          }
+
           ball.x += ball.vx * dt;
           ball.y += ball.vy * dt;
 
           // Wall collisions
           this.resolveWallCollisions(ball, course.walls, prevX, prevY);
 
-          // Bumper collisions
-          if (course.bumpers) {
-            this.resolveBumperCollisions(ball, course.bumpers);
-          }
-
           // Water hazard
           if (course.hazards) {
             for (const hazard of course.hazards) {
-              if (hazard.type === 'water' &&
-                  ball.x >= hazard.x && ball.x <= hazard.x + hazard.width &&
-                  ball.y >= hazard.y && ball.y <= hazard.y + hazard.height) {
+              if (hazard.type === 'water' && this.isBallInHazard(ball, hazard)) {
                 ball.x = player.lastSafeX;
                 ball.y = player.lastSafeY;
                 ball.vx = 0;
@@ -101,7 +152,7 @@ class PhysicsEngine {
             const dy = ball.y - course.hole.y;
             const distSqr = dx * dx + dy * dy;
             const currentSpeed = Math.sqrt(ball.vx * ball.vx + ball.vy * ball.vy);
-            
+
             if (distSqr <= course.hole.radius * course.hole.radius && currentSpeed < 6.0) {
               ball.x = course.hole.x;
               ball.y = course.hole.y;
@@ -128,7 +179,45 @@ class PhysicsEngine {
   }
 
   /**
-   * Resolve wall collisions against line segments
+   * Whether the ball's outer edge overlaps a hazard shape (polygon-based sand
+   * bunkers, or axis-aligned water rectangles).
+   */
+  isBallInHazard(ball, hazard) {
+    if (hazard.points) {
+      return circleOverlapsPolygon(ball.x, ball.y, this.ballRadius, hazard.points);
+    }
+    return circleOverlapsRect(ball.x, ball.y, this.ballRadius, hazard.x, hazard.y, hazard.width, hazard.height);
+  }
+
+  /**
+   * Apply a light magnetic pull toward the hole when the ball passes just past the
+   * rim, so shots that skim the cup have a small chance to curve in.
+   */
+  applyHoleAttraction(ball, hole) {
+    const attractRadius = hole.radius * this.holeAttractionMultiplier;
+    const dx = hole.x - ball.x;
+    const dy = hole.y - ball.y;
+    const distSqr = dx * dx + dy * dy;
+    if (distSqr > attractRadius * attractRadius) return;
+
+    const dist = Math.sqrt(distSqr);
+    if (dist < 0.5) return;
+
+    // Fast-moving balls resist the pull so a hard shot isn't yanked off course;
+    // slow, rolling balls near the lip get the (still light) attraction.
+    const speed = Math.sqrt(ball.vx * ball.vx + ball.vy * ball.vy);
+    const speedFactor = Math.max(0.1, 1 - speed / 14);
+    const proximityFactor = 1 - dist / attractRadius;
+    const strength = this.holeAttractionStrength * proximityFactor * proximityFactor * speedFactor;
+
+    ball.vx += (dx / dist) * strength;
+    ball.vy += (dy / dist) * strength;
+  }
+
+  /**
+   * Resolve wall collisions against line segments. The ball's radius (its outer
+   * edge, not its center) is the collision frontier used for both detection and
+   * push-out, so the ball never visually sinks into a wall before bouncing.
    */
   resolveWallCollisions(ball, walls, prevX, prevY) {
     if (!walls) return;
@@ -167,50 +256,17 @@ class PhysicsEngine {
           ny = side >= 0 ? wx / len : -wx / len;
         }
 
-        // Push ball out
+        // Push ball out so its outer edge, not its center, rests at the wall
         ball.x = cx + nx * (r + 0.1);
         ball.y = cy + ny * (r + 0.1);
 
-        // Reflect velocity: v' = v - (1 + e)(v . n)n
+        // Reflect velocity: v' = v - (1 + e)(v . n)n, then bleed a little speed
         const dot = ball.vx * nx + ball.vy * ny;
         if (dot < 0) {
           ball.vx -= (1 + bounce) * dot * nx;
           ball.vy -= (1 + bounce) * dot * ny;
-        }
-      }
-    }
-  }
-
-  /**
-   * Resolve circular bumper collisions
-   */
-  resolveBumperCollisions(ball, bumpers) {
-    const r = this.ballRadius;
-
-    for (const bumper of bumpers) {
-      const dx = ball.x - bumper.x;
-      const dy = ball.y - bumper.y;
-      const minDist = r + bumper.radius;
-      const distSqr = dx * dx + dy * dy;
-
-      if (distSqr < minDist * minDist) {
-        const dist = Math.sqrt(distSqr);
-        let nx = 1, ny = 0;
-        if (dist > 0.001) {
-          nx = dx / dist;
-          ny = dy / dist;
-        }
-
-        const bounce = bumper.bounce || 1.3;
-
-        // Push ball out
-        ball.x = bumper.x + nx * (minDist + 0.1);
-        ball.y = bumper.y + ny * (minDist + 0.1);
-
-        const dot = ball.vx * nx + ball.vy * ny;
-        if (dot < 0) {
-          ball.vx -= (1 + bounce) * dot * nx;
-          ball.vy -= (1 + bounce) * dot * ny;
+          ball.vx *= this.collisionDamping;
+          ball.vy *= this.collisionDamping;
         }
       }
     }
@@ -253,6 +309,11 @@ class PhysicsEngine {
         b1.vy -= impulseScalar * ny;
         b2.vx += impulseScalar * nx;
         b2.vy += impulseScalar * ny;
+
+        b1.vx *= this.collisionDamping;
+        b1.vy *= this.collisionDamping;
+        b2.vx *= this.collisionDamping;
+        b2.vy *= this.collisionDamping;
       }
     }
   }

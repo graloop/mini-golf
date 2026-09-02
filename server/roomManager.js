@@ -4,7 +4,7 @@
  * course transitions, and memory cleanup for inactive rooms.
  */
 
-const { COURSES } = require('./courses');
+const { PARCOURS } = require('./courses');
 const { PhysicsEngine } = require('./physicsEngine');
 
 const PLAYER_COLORS = [
@@ -107,13 +107,20 @@ class RoomManager {
     return { room, player };
   }
 
-  startGame(roomId, hostId) {
+  startGame(roomId, hostId, parcourId) {
     const room = this.rooms.get(roomId);
     if (!room) return { error: "Room not found" };
     const player = room.players.find(p => p.id === hostId);
     if (!player || !player.isHost) return { error: "Only host can start the game" };
     if (room.players.length < 1) return { error: "Not enough players" };
 
+    const parcour = PARCOURS[parcourId] || PARCOURS["green-valley"];
+    if (!parcour || !parcour.courses || parcour.courses.length === 0) {
+      return { error: "Selected parcour is not available yet" };
+    }
+
+    room.parcourId = parcour.id;
+    room.courses = parcour.courses;
     room.status = "playing";
     room.currentCourseIndex = 0;
     this.loadCourse(room, 0);
@@ -124,14 +131,14 @@ class RoomManager {
   }
 
   loadCourse(room, courseIndex) {
-    if (courseIndex >= COURSES.length) {
+    if (courseIndex >= room.courses.length) {
       room.status = "finished";
       room.broadcast({ type: "GAME_OVER", players: room.players });
       return;
     }
 
     room.currentCourseIndex = courseIndex;
-    room.currentCourse = COURSES[courseIndex];
+    room.currentCourse = room.courses[courseIndex];
     room.activePlayerIndex = 0;
 
     // Reset all players for the new hole
@@ -209,8 +216,8 @@ class RoomManager {
       return { error: "Ball is already moving or sunk" };
     }
 
-    // Clamp power (max power e.g. 20)
-    const clampedPower = Math.min(Math.max(power, 1), 25);
+    // Clamp power — shots are intentionally less powerful than before
+    const clampedPower = Math.min(Math.max(power, 1), 18);
     
     // Set safe position before shooting
     activePlayer.lastSafeX = ball.x;
@@ -286,25 +293,7 @@ class RoomManager {
       }
 
       // Next course
-      setTimeout(() => {
-        const nextIndex = room.currentCourseIndex + 1;
-        if (nextIndex >= COURSES.length) {
-          room.status = "finished";
-          room.broadcast({
-            type: "GAME_FINISHED",
-            players: room.players
-          });
-          if (room.physicsInterval) clearInterval(room.physicsInterval);
-        } else {
-          this.loadCourse(room, nextIndex);
-          room.broadcast({
-            type: "NEXT_HOLE",
-            courseIndex: nextIndex,
-            course: room.currentCourse,
-            players: room.players
-          });
-        }
-      }, 2000);
+      setTimeout(() => this.advanceToNextCourse(room), 2000);
       return;
     }
 
@@ -319,6 +308,56 @@ class RoomManager {
       activePlayerId: room.players[room.activePlayerIndex].id,
       activePlayerName: room.players[room.activePlayerIndex].name
     });
+  }
+
+  /**
+   * Loads the next course (or finishes the game if that was the last one) and
+   * broadcasts the transition. Shared by natural hole completion and host skip.
+   */
+  advanceToNextCourse(room) {
+    const nextIndex = room.currentCourseIndex + 1;
+    if (nextIndex >= room.courses.length) {
+      room.status = "finished";
+      room.broadcast({
+        type: "GAME_FINISHED",
+        players: room.players
+      });
+      if (room.physicsInterval) clearInterval(room.physicsInterval);
+    } else {
+      this.loadCourse(room, nextIndex);
+      room.broadcast({
+        type: "NEXT_HOLE",
+        courseIndex: nextIndex,
+        course: room.currentCourse,
+        players: room.players,
+        activePlayerId: room.players[room.activePlayerIndex].id
+      });
+    }
+  }
+
+  /**
+   * Host-only: immediately abandon the current hole for everyone and move on,
+   * for when a hole turns out to be unplayable or the group wants to move faster.
+   */
+  skipHole(roomId, playerId) {
+    const room = this.rooms.get(roomId);
+    if (!room) return { error: "Room not found" };
+    if (room.status !== "playing") return { error: "Game is not in progress" };
+
+    const player = room.players.find(p => p.id === playerId);
+    if (!player || !player.isHost) return { error: "Only the host can skip the hole" };
+
+    if (room.shotMonitorTimer) {
+      clearInterval(room.shotMonitorTimer);
+      room.shotMonitorTimer = null;
+    }
+
+    for (const p of room.players) {
+      p.holeScores.push(p.strokes);
+    }
+
+    this.advanceToNextCourse(room);
+    return { success: true };
   }
 
   checkHoleProgress(room) {

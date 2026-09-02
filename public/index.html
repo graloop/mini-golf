@@ -55,6 +55,37 @@
     </div>
   </div>
 
+  <!-- ============ PARCOUR SELECTION SCREEN ============ -->
+  <div id="screen-select-course" class="screen hidden">
+    <div class="card wide">
+      <h1>⛳ Choose Your Parcour</h1>
+      <p class="subtitle">Pick a course pack to play</p>
+
+      <div class="parcour-list">
+        <div class="parcour-card" data-parcour="green-valley">
+          <div class="parcour-thumb parcour-thumb-green-valley"></div>
+          <div class="parcour-info">
+            <h3>Green Valley</h3>
+            <p>4 holes · Turf, bumpers &amp; water hazards</p>
+          </div>
+          <button class="btn primary btn-select-parcour" data-parcour="green-valley">Play</button>
+        </div>
+
+        <div class="parcour-card disabled" data-parcour="frost">
+          <div class="parcour-thumb parcour-thumb-frost"></div>
+          <div class="parcour-info">
+            <h3>Frost Parcour</h3>
+            <p>Coming soon ❄️</p>
+          </div>
+          <button class="btn btn-select-parcour" disabled>Locked</button>
+        </div>
+      </div>
+
+      <p id="select-course-error" class="error-msg hidden"></p>
+      <button id="btn-back-to-lobby" class="btn small" style="margin-top: 1rem;">← Back to lobby</button>
+    </div>
+  </div>
+
   <!-- ============ GAME SCREEN ============ -->
   <div id="screen-game" class="screen hidden">
     <div class="game-layout">
@@ -71,6 +102,7 @@
         <h2>Scoreboard</h2>
         <div id="score-table" class="score-table"></div>
         <div class="scoreboard-footer">
+          <button id="btn-skip-hole" class="btn small hidden">⏭ Skip Hole</button>
           <button id="btn-leave" class="btn small danger">Leave Game</button>
         </div>
       </aside>

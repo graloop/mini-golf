@@ -126,7 +126,7 @@ wss.on('connection', (ws) => {
         }
 
         case "START_GAME": {
-          const result = roomManager.startGame(data.roomId, currentPlayerId);
+          const result = roomManager.startGame(data.roomId, currentPlayerId, data.parcourId);
           if (result.error) {
             ws.send(JSON.stringify({ type: "ERROR", message: result.error }));
           } else {
@@ -151,6 +151,14 @@ wss.on('connection', (ws) => {
 
         case "SHOOT": {
           const result = roomManager.shootBall(currentRoomId, currentPlayerId, data.angle, data.power);
+          if (result.error) {
+            ws.send(JSON.stringify({ type: "ERROR", message: result.error }));
+          }
+          break;
+        }
+
+        case "SKIP_HOLE": {
+          const result = roomManager.skipHole(data.roomId, currentPlayerId);
           if (result.error) {
             ws.send(JSON.stringify({ type: "ERROR", message: result.error }));
           }
