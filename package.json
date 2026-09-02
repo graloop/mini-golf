@@ -1,0 +1,23 @@
+{
+  "name": "mini-golf-2d",
+  "version": "1.0.0",
+  "description": "Ultra-lightweight multiplayer 2D mini-golf web application",
+  "main": "server/index.js",
+  "scripts": {
+    "start": "node server/index.js",
+    "dev": "node --watch server/index.js",
+    "test": "node tests/physics.test.js"
+  },
+  "keywords": [
+    "minigolf",
+    "multiplayer",
+    "websocket",
+    "canvas2d",
+    "lightweight"
+  ],
+  "author": "",
+  "license": "MIT",
+  "dependencies": {
+    "ws": "^8.18.0"
+  }
+}

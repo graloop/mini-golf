@@ -1,0 +1,16 @@
+version: '3.8'
+
+services:
+  mini-golf:
+    build: .
+    container_name: mini-golf-2d
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    environment:
+      - PORT=3000
+      - APP_PASSWORD=secret123 # Set your lobby access password here (or leave empty for open access)
+    deploy:
+      resources:
+        limits:
+          memory: 256M # Extremely lightweight (< 50MB actual usage)

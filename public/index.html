@@ -1,0 +1,91 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Mini-Golf 2D — Multiplayer</title>
+  <link rel="stylesheet" href="style.css" />
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>⛳</text></svg>" />
+</head>
+<body>
+  <!-- ============ PASSWORD GATE ============ -->
+  <div id="screen-password" class="screen hidden">
+    <div class="card">
+      <h1>⛳ Mini-Golf 2D</h1>
+      <p class="subtitle">Enter the password to continue</p>
+      <input type="password" id="password-input" placeholder="Password" autocomplete="off" />
+      <button id="btn-auth" class="btn primary">Enter</button>
+      <p id="auth-error" class="error-msg hidden">Incorrect password</p>
+    </div>
+  </div>
+
+  <!-- ============ LOBBY SCREEN ============ -->
+  <div id="screen-lobby" class="screen hidden">
+    <div class="card">
+      <h1>⛳ Mini-Golf 2D</h1>
+      <p class="subtitle">Multiplayer mini-golf — up to 7 players</p>
+
+      <div class="lobby-row">
+        <input type="text" id="player-name" placeholder="Your name" maxlength="16" />
+      </div>
+
+      <div class="lobby-actions">
+        <button id="btn-create" class="btn primary">Create Game</button>
+        <div class="join-group">
+          <input type="text" id="room-code-input" placeholder="Room code" maxlength="4" />
+          <button id="btn-join" class="btn">Join</button>
+        </div>
+      </div>
+
+      <p id="lobby-error" class="error-msg hidden"></p>
+
+      <!-- In-room lobby panel -->
+      <div id="room-panel" class="hidden">
+        <div class="room-header">
+          <span>Room code:</span>
+          <span id="room-code-display" class="room-code"></span>
+          <button id="btn-copy-code" class="btn small" title="Copy invite link">📋 Copy link</button>
+        </div>
+        <ul id="lobby-players" class="player-list"></ul>
+        <div class="lobby-footer">
+          <span id="lobby-status" class="muted"></span>
+          <button id="btn-start" class="btn primary hidden">Start Game</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ============ GAME SCREEN ============ -->
+  <div id="screen-game" class="screen hidden">
+    <div class="game-layout">
+      <!-- Left: canvas -->
+      <div class="canvas-wrap">
+        <div id="hole-banner" class="hole-banner"></div>
+        <canvas id="game-canvas" width="1000" height="600"></canvas>
+        <div id="turn-banner" class="turn-banner"></div>
+        <div id="shot-msg" class="shot-msg hidden"></div>
+      </div>
+
+      <!-- Right: scoreboard -->
+      <aside class="scoreboard">
+        <h2>Scoreboard</h2>
+        <div id="score-table" class="score-table"></div>
+        <div class="scoreboard-footer">
+          <button id="btn-leave" class="btn small danger">Leave Game</button>
+        </div>
+      </aside>
+    </div>
+  </div>
+
+  <!-- ============ GAME OVER OVERLAY ============ -->
+  <div id="overlay-gameover" class="overlay hidden">
+    <div class="card">
+      <h1>🏆 Game Over</h1>
+      <div id="final-scores" class="final-scores"></div>
+      <button id="btn-back-lobby" class="btn primary">Back to Lobby</button>
+    </div>
+  </div>
+
+  <script src="client.js"></script>
+</body>
+</html>
