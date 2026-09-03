@@ -26,6 +26,10 @@ class RoomManager {
     setInterval(() => this.cleanupInactiveRooms(), 10 * 60 * 1000);
   }
 
+  sanitizeName(name) {
+    return String(name || "").trim().slice(0, 20);
+  }
+
   generateRoomCode() {
     const chars = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
     let code = "";
@@ -61,7 +65,7 @@ class RoomManager {
 
     const hostPlayer = {
       id: Math.random().toString(36).substring(2, 9),
-      name: hostPlayerName || "Player 1",
+      name: this.sanitizeName(hostPlayerName) || "Player 1",
       color: PLAYER_COLORS[0],
       ws: ws,
       isHost: true,
@@ -85,11 +89,10 @@ class RoomManager {
     if (room.status !== "lobby") return { error: "Game already in progress" };
     if (room.players.length >= 7) return { error: "Room is full (max 7 players)" };
 
-    // Check if name is taken
     const colorIndex = room.players.length;
     const player = {
       id: Math.random().toString(36).substring(2, 9),
-      name: playerName || `Player ${colorIndex + 1}`,
+      name: this.sanitizeName(playerName) || `Player ${colorIndex + 1}`,
       color: PLAYER_COLORS[colorIndex % PLAYER_COLORS.length],
       ws: ws,
       isHost: false,
@@ -160,27 +163,27 @@ class RoomManager {
   startPhysicsLoop(room) {
     if (room.physicsInterval) clearInterval(room.physicsInterval);
 
+    // Room event hooks for the physics engine — set once rather than on every
+    // tick, since the closures never change for the lifetime of the room.
+    room.onWaterHazard = (player) => {
+      room.broadcast({
+        type: "HAZARD_HIT",
+        playerId: player.id,
+        hazardType: "water",
+        strokes: player.strokes
+      });
+    };
+
+    room.onBallSunk = (player) => {
+      room.broadcast({
+        type: "BALL_SUNK",
+        playerId: player.id
+      });
+    };
+
     room.physicsInterval = setInterval(() => {
       room.lastActivity = Date.now();
       if (room.status !== "playing") return;
-
-      // Call room event hooks for physics engine
-      room.onWaterHazard = (player) => {
-        room.broadcast({
-          type: "HAZARD_HIT",
-          playerId: player.id,
-          hazardType: "water",
-          strokes: player.strokes
-        });
-      };
-
-      room.onBallSunk = (player) => {
-        room.broadcast({
-          type: "BALL_SUNK",
-          playerId: player.id
-        });
-        this.checkHoleProgress(room);
-      };
 
       const isMoving = this.physics.updateRoom(room);
 
@@ -271,17 +274,18 @@ class RoomManager {
   advanceTurn(room) {
     if (room.status !== "playing") return;
 
-    // Check if current player sunk their ball
+    // Move on from the current player, unless they already sunk their ball
+    // earlier this hole (in which case we're just looking for the next one up)
     const currentPlayer = room.players[room.activePlayerIndex];
-    if (currentPlayer && currentPlayer.sunk) {
-      // Current player already finished this hole, find next unsunk player
-    } else {
-      // Move to next player who hasn't sunk
-      let attempts = 0;
-      do {
-        room.activePlayerIndex = (room.activePlayerIndex + 1) % room.players.length;
-        attempts++;
-      } while (room.players[room.activePlayerIndex].sunk && attempts < room.players.length);
+    if (!currentPlayer || !currentPlayer.sunk) {
+      room.activePlayerIndex = (room.activePlayerIndex + 1) % room.players.length;
+    }
+
+    // Skip any players who have already sunk their ball this hole
+    let attempts = 0;
+    while (room.players[room.activePlayerIndex].sunk && attempts < room.players.length) {
+      room.activePlayerIndex = (room.activePlayerIndex + 1) % room.players.length;
+      attempts++;
     }
 
     // Check if ALL players have sunk their balls for this hole
@@ -295,11 +299,6 @@ class RoomManager {
       // Next course
       setTimeout(() => this.advanceToNextCourse(room), 2000);
       return;
-    }
-
-    // If next player is already sunk, skip again
-    while (room.players[room.activePlayerIndex].sunk) {
-      room.activePlayerIndex = (room.activePlayerIndex + 1) % room.players.length;
     }
 
     // Broadcast turn update
@@ -360,38 +359,64 @@ class RoomManager {
     return { success: true };
   }
 
-  checkHoleProgress(room) {
-    const allSunk = room.players.every(p => p.sunk);
-    if (allSunk && room.status === "playing") {
-      // Triggered via monitorShotCompletion or ball sunk
-    }
-  }
-
   removePlayer(ws) {
     for (const [roomId, room] of this.rooms.entries()) {
       const index = room.players.findIndex(p => p.ws === ws);
-      if (index !== -1) {
-        const removed = room.players.splice(index, 1)[0];
-        
-        if (room.players.length === 0) {
-          this.destroyRoom(roomId);
-        } else {
-          // If host left, assign new host
-          if (removed.isHost && room.players.length > 0) {
-            room.players[0].isHost = true;
-          }
-          // If active player left, advance turn
-          if (room.status === "playing" && room.activePlayerIndex >= room.players.length) {
-            room.activePlayerIndex = 0;
-          }
-          room.broadcast({
-            type: "PLAYER_LEFT",
-            playerId: removed.id,
-            players: room.players
-          });
-        }
+      if (index === -1) continue;
+
+      const removed = room.players.splice(index, 1)[0];
+
+      if (room.players.length === 0) {
+        this.destroyRoom(roomId);
         break;
       }
+
+      // If host left, assign new host
+      if (removed.isHost) {
+        room.players[0].isHost = true;
+      }
+
+      // Splicing shifts every later player's index down by one, so
+      // activePlayerIndex needs to be reconciled or it'll silently point at
+      // the wrong player (or the game will stall on a player who just left).
+      let turnChanged = false;
+      if (room.status === "playing") {
+        if (index < room.activePlayerIndex) {
+          room.activePlayerIndex -= 1;
+        } else if (index === room.activePlayerIndex) {
+          // The active player left mid-turn: cancel their pending shot check
+          // and hand the turn to whoever now occupies this slot (the array
+          // shift already advanced it to the next player).
+          if (room.shotMonitorTimer) {
+            clearInterval(room.shotMonitorTimer);
+            room.shotMonitorTimer = null;
+          }
+          if (room.activePlayerIndex >= room.players.length) {
+            room.activePlayerIndex = 0;
+          }
+          let attempts = 0;
+          while (room.players[room.activePlayerIndex].sunk && attempts < room.players.length) {
+            room.activePlayerIndex = (room.activePlayerIndex + 1) % room.players.length;
+            attempts++;
+          }
+          turnChanged = true;
+        }
+      }
+
+      room.broadcast({
+        type: "PLAYER_LEFT",
+        playerId: removed.id,
+        players: room.players
+      });
+
+      if (turnChanged) {
+        room.broadcast({
+          type: "TURN_UPDATE",
+          activePlayerId: room.players[room.activePlayerIndex].id,
+          activePlayerName: room.players[room.activePlayerIndex].name
+        });
+      }
+      break;
     }
   }
 

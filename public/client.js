@@ -67,6 +67,12 @@ const btnSkipHole = document.getElementById('btn-skip-hole');
 const finalScores = document.getElementById('final-scores');
 const btnBackLobby = document.getElementById('btn-back-lobby');
 
+// Escape untrusted text (player names) before interpolating into innerHTML
+const HTML_ESCAPES = { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' };
+function escapeHtml(str) {
+  return String(str).replace(/[&<>"']/g, (c) => HTML_ESCAPES[c]);
+}
+
 // Show screen helper
 function showScreen(screenKey) {
   for (const key in screens) {
@@ -274,7 +280,7 @@ function updateLobbyUI() {
     const li = document.createElement('li');
     li.innerHTML = `
       <span class="player-dot" style="background: ${p.color}"></span>
-      <span>${p.name} ${p.id === state.myId ? '(You)' : ''}</span>
+      <span>${escapeHtml(p.name)} ${p.id === state.myId ? '(You)' : ''}</span>
       ${p.isHost ? '<span class="host-badge">HOST</span>' : ''}
     `;
     lobbyPlayersList.appendChild(li);
@@ -319,7 +325,7 @@ function updateScoreboard() {
     row.innerHTML = `
       <div class="name-col">
         <span class="player-dot" style="background: ${p.color}"></span>
-        <span>${p.name}</span>
+        <span>${escapeHtml(p.name)}</span>
       </div>
       <div class="score-col">${p.score || 0} pts (${p.strokes || 0})</div>
     `;
@@ -347,7 +353,7 @@ function showGameOver() {
       <div style="display:flex;align-items:center;gap:0.75rem;">
         <span style="font-weight:bold;color:#f59e0b;">#${idx + 1}</span>
         <span class="player-dot" style="background: ${p.color}"></span>
-        <span style="font-weight:600;">${p.name}</span>
+        <span style="font-weight:600;">${escapeHtml(p.name)}</span>
       </div>
       <span style="font-weight:bold;color:#38bdf8;">${p.score || 0} strokes</span>
     `;

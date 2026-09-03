@@ -26,10 +26,20 @@ const MIME_TYPES = {
   '.ico': 'image/x-icon'
 };
 
+const PUBLIC_DIR = path.join(__dirname, '../public');
+
 const server = http.createServer((req, res) => {
-  // Parse URL
-  let filePath = req.url === '/' ? '/index.html' : req.url;
-  filePath = path.join(__dirname, '../public', filePath);
+  // Parse URL, stripping any query string/hash before resolving to a file
+  const urlPath = req.url.split('?')[0].split('#')[0];
+  const requestedPath = urlPath === '/' ? '/index.html' : decodeURIComponent(urlPath);
+  const filePath = path.normalize(path.join(PUBLIC_DIR, requestedPath));
+
+  // Guard against path traversal (e.g. "/../server/index.js") escaping the public dir
+  if (!filePath.startsWith(PUBLIC_DIR + path.sep) && filePath !== PUBLIC_DIR) {
+    res.writeHead(403, { 'Content-Type': 'text/html' });
+    res.end('<h1>403 Forbidden</h1>');
+    return;
+  }
 
   const extname = path.extname(filePath).toLowerCase();
   const contentType = MIME_TYPES[extname] || 'application/octet-stream';
@@ -126,7 +136,7 @@ wss.on('connection', (ws) => {
         }
 
         case "START_GAME": {
-          const result = roomManager.startGame(data.roomId, currentPlayerId, data.parcourId);
+          const result = roomManager.startGame(currentRoomId, currentPlayerId, data.parcourId);
           if (result.error) {
             ws.send(JSON.stringify({ type: "ERROR", message: result.error }));
           } else {
@@ -158,7 +168,7 @@ wss.on('connection', (ws) => {
         }
 
         case "SKIP_HOLE": {
-          const result = roomManager.skipHole(data.roomId, currentPlayerId);
+          const result = roomManager.skipHole(currentRoomId, currentPlayerId);
           if (result.error) {
             ws.send(JSON.stringify({ type: "ERROR", message: result.error }));
           }
