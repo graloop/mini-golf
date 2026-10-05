@@ -502,3 +502,10 @@ canvas {
   border-color: #eab308;
   background: rgba(234, 179, 8, 0.1);
 }
+
+/* Moved from inline styles (blocked by the Content-Security-Policy) */
+.btn-back-to-lobby { margin-top: 1rem; }
+.final-score-left { display: flex; align-items: center; gap: 0.75rem; }
+.final-score-rank { font-weight: bold; color: #f59e0b; }
+.final-score-name { font-weight: 600; }
+.final-score-total { font-weight: bold; color: #38bdf8; }

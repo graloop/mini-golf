@@ -265,18 +265,29 @@ function initBalls(players) {
 }
 
 // ================= UI UPDATERS =================
+// Player names come from other users: always render them with textContent, never innerHTML.
+function el(tag, className, text) {
+  const node = document.createElement(tag);
+  if (className) node.className = className;
+  if (text !== undefined) node.textContent = text;
+  return node;
+}
+
+function playerDot(color) {
+  const dot = el('span', 'player-dot');
+  if (typeof color === 'string' && /^#[0-9a-f]{6}$/i.test(color)) dot.style.background = color;
+  return dot;
+}
+
 function updateLobbyUI() {
   roomPanel.classList.remove('hidden');
   roomCodeDisplay.textContent = state.roomId;
-  lobbyPlayersList.innerHTML = '';
+  lobbyPlayersList.replaceChildren();
 
   for (const p of state.players) {
     const li = document.createElement('li');
-    li.innerHTML = `
-      <span class="player-dot" style="background: ${p.color}"></span>
-      <span>${p.name} ${p.id === state.myId ? '(You)' : ''}</span>
-      ${p.isHost ? '<span class="host-badge">HOST</span>' : ''}
-    `;
+    li.append(playerDot(p.color), el('span', '', `${p.name} ${p.id === state.myId ? '(You)' : ''}`));
+    if (p.isHost) li.append(el('span', 'host-badge', 'HOST'));
     lobbyPlayersList.appendChild(li);
   }
 
@@ -309,20 +320,16 @@ function updateTurnUI() {
 }
 
 function updateScoreboard() {
-  scoreTable.innerHTML = '';
+  scoreTable.replaceChildren();
   // Sort by total score ascending
   const sorted = [...state.players].sort((a, b) => (a.score || 0) - (b.score || 0));
 
   for (const p of sorted) {
     const row = document.createElement('div');
     row.className = `score-row ${p.id === state.activePlayerId ? 'active' : ''}`;
-    row.innerHTML = `
-      <div class="name-col">
-        <span class="player-dot" style="background: ${p.color}"></span>
-        <span>${p.name}</span>
-      </div>
-      <div class="score-col">${p.score || 0} pts (${p.strokes || 0})</div>
-    `;
+    const nameCol = el('div', 'name-col');
+    nameCol.append(playerDot(p.color), el('span', '', p.name));
+    row.append(nameCol, el('div', 'score-col', `${Number(p.score) || 0} pts (${Number(p.strokes) || 0})`));
     scoreTable.appendChild(row);
   }
 }
@@ -337,20 +344,15 @@ function showShotMessage(text) {
 
 function showGameOver() {
   overlayGameOver.classList.remove('hidden');
-  finalScores.innerHTML = '';
+  finalScores.replaceChildren();
   const sorted = [...state.players].sort((a, b) => (a.score || 0) - (b.score || 0));
 
   sorted.forEach((p, idx) => {
     const item = document.createElement('div');
     item.className = `final-score-item ${idx === 0 ? 'winner' : ''}`;
-    item.innerHTML = `
-      <div style="display:flex;align-items:center;gap:0.75rem;">
-        <span style="font-weight:bold;color:#f59e0b;">#${idx + 1}</span>
-        <span class="player-dot" style="background: ${p.color}"></span>
-        <span style="font-weight:600;">${p.name}</span>
-      </div>
-      <span style="font-weight:bold;color:#38bdf8;">${p.score || 0} strokes</span>
-    `;
+    const left = el('div', 'final-score-left');
+    left.append(el('span', 'final-score-rank', `#${idx + 1}`), playerDot(p.color), el('span', 'final-score-name', p.name));
+    item.append(left, el('span', 'final-score-total', `${Number(p.score) || 0} strokes`));
     finalScores.appendChild(item);
   });
 }

@@ -4,6 +4,7 @@
  * course transitions, and memory cleanup for inactive rooms.
  */
 
+const crypto = require('crypto');
 const { PARCOURS } = require('./courses');
 const { PhysicsEngine } = require('./physicsEngine');
 
@@ -16,6 +17,33 @@ const PLAYER_COLORS = [
   "#ec4899", // Pink
   "#06b6d4"  // Cyan
 ];
+
+const MAX_ROOMS = Number(process.env.MAX_ROOMS || 100);
+
+// Only these fields are ever sent to clients (never the server-side socket).
+function publicPlayer(p) {
+  return {
+    id: p.id,
+    name: p.name,
+    color: p.color,
+    isHost: p.isHost,
+    score: p.score,
+    strokes: p.strokes,
+    holeScores: p.holeScores,
+    sunk: p.sunk,
+    ball: p.ball
+  };
+}
+
+function generatePlayerId() {
+  return crypto.randomBytes(8).toString('hex');
+}
+
+function normalizePlayerName(name, fallback) {
+  if (typeof name !== "string") return fallback;
+  const normalized = name.replace(/[\u0000-\u001f\u007f]/g, "").trim().slice(0, 16);
+  return normalized || fallback;
+}
 
 class RoomManager {
   constructor() {
@@ -30,13 +58,14 @@ class RoomManager {
     const chars = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
     let code = "";
     for (let i = 0; i < 4; i++) {
-      code += chars.charAt(Math.floor(Math.random() * chars.length));
+      code += chars.charAt(crypto.randomInt(chars.length));
     }
     if (this.rooms.has(code)) return this.generateRoomCode();
     return code;
   }
 
   createRoom(hostPlayerName, ws) {
+    if (this.rooms.size >= MAX_ROOMS) return { error: "Server is full, try again later" };
     const roomId = this.generateRoomCode();
     const room = {
       id: roomId,
@@ -60,8 +89,8 @@ class RoomManager {
     };
 
     const hostPlayer = {
-      id: Math.random().toString(36).substring(2, 9),
-      name: hostPlayerName || "Player 1",
+      id: generatePlayerId(),
+      name: normalizePlayerName(hostPlayerName, "Player 1"),
       color: PLAYER_COLORS[0],
       ws: ws,
       isHost: true,
@@ -88,8 +117,8 @@ class RoomManager {
     // Check if name is taken
     const colorIndex = room.players.length;
     const player = {
-      id: Math.random().toString(36).substring(2, 9),
-      name: playerName || `Player ${colorIndex + 1}`,
+      id: generatePlayerId(),
+      name: normalizePlayerName(playerName, `Player ${colorIndex + 1}`),
       color: PLAYER_COLORS[colorIndex % PLAYER_COLORS.length],
       ws: ws,
       isHost: false,
@@ -112,9 +141,12 @@ class RoomManager {
     if (!room) return { error: "Room not found" };
     const player = room.players.find(p => p.id === hostId);
     if (!player || !player.isHost) return { error: "Only host can start the game" };
+    if (room.status !== "lobby") return { error: "Game already started" };
     if (room.players.length < 1) return { error: "Not enough players" };
 
-    const parcour = PARCOURS[parcourId] || PARCOURS["green-valley"];
+    const parcour = (typeof parcourId === "string" && Object.hasOwn(PARCOURS, parcourId))
+      ? PARCOURS[parcourId]
+      : PARCOURS["green-valley"];
     if (!parcour || !parcour.courses || parcour.courses.length === 0) {
       return { error: "Selected parcour is not available yet" };
     }
@@ -133,7 +165,7 @@ class RoomManager {
   loadCourse(room, courseIndex) {
     if (courseIndex >= room.courses.length) {
       room.status = "finished";
-      room.broadcast({ type: "GAME_OVER", players: room.players });
+      room.broadcast({ type: "GAME_OVER", players: room.players.map(publicPlayer) });
       return;
     }
 
@@ -205,6 +237,9 @@ class RoomManager {
   shootBall(roomId, playerId, angle, power) {
     const room = this.rooms.get(roomId);
     if (!room || room.status !== "playing") return { error: "Invalid room or game not active" };
+    if (!Number.isFinite(angle) || !Number.isFinite(power)) {
+      return { error: "Invalid shot parameters" };
+    }
 
     const activePlayer = room.players[room.activePlayerIndex];
     if (!activePlayer || activePlayer.id !== playerId) {
@@ -315,12 +350,15 @@ class RoomManager {
    * broadcasts the transition. Shared by natural hole completion and host skip.
    */
   advanceToNextCourse(room) {
+    // Called from a timer: the room may have been destroyed in the meantime.
+    if (this.rooms.get(room.id) !== room || room.players.length === 0 || room.status !== "playing") return;
+
     const nextIndex = room.currentCourseIndex + 1;
     if (nextIndex >= room.courses.length) {
       room.status = "finished";
       room.broadcast({
         type: "GAME_FINISHED",
-        players: room.players
+        players: room.players.map(publicPlayer)
       });
       if (room.physicsInterval) clearInterval(room.physicsInterval);
     } else {
@@ -329,7 +367,7 @@ class RoomManager {
         type: "NEXT_HOLE",
         courseIndex: nextIndex,
         course: room.currentCourse,
-        players: room.players,
+        players: room.players.map(publicPlayer),
         activePlayerId: room.players[room.activePlayerIndex].id
       });
     }
@@ -387,7 +425,7 @@ class RoomManager {
           room.broadcast({
             type: "PLAYER_LEFT",
             playerId: removed.id,
-            players: room.players
+            players: room.players.map(publicPlayer)
           });
         }
         break;
@@ -415,4 +453,4 @@ class RoomManager {
   }
 }
 
-module.exports = { RoomManager };
+module.exports = { RoomManager, publicPlayer };
