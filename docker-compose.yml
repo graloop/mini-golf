@@ -1,16 +1,29 @@
-version: '3.8'
-
 services:
   mini-golf:
     build: .
     container_name: mini-golf-2d
     restart: unless-stopped
+    # Only reachable from the host itself: nginx proxies golf.graloop.com -> 127.0.0.1:3000.
+    # Never change this to "3000:3000" (that would expose the app directly, bypassing TLS).
     ports:
-      - "3000:3000"
+      - "127.0.0.1:3000:3000"
+    env_file: .env # APP_PASSWORD lives here (see .env.example); never commit .env
     environment:
       - PORT=3000
-      - APP_PASSWORD=secret123 # Set your lobby access password here (or leave empty for open access)
-    deploy:
-      resources:
-        limits:
-          memory: 256M # Extremely lightweight (< 50MB actual usage)
+      - TRUST_PROXY=true
+      - ALLOWED_ORIGINS=https://golf.graloop.com
+    read_only: true
+    tmpfs:
+      - /tmp:size=8m
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    pids_limit: 100
+    mem_limit: 256m
+    cpus: 1.0
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
